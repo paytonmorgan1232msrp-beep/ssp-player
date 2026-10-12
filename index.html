@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>SSP player bridge</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+  #p { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+/* SOUTHSIDE PROJECTS - YouTube player bridge.
+ * Host this single file on any https website (GitHub Pages, Netlify, Cloudflare Pages ...).
+ * The loading screen embeds it in an iframe and controls it with postMessage, so YouTube
+ * sees a normal https page as the embedding site. It only plays a video; it holds no secrets.
+ */
+(function () {
+    var player = null, ready = false, apiReady = false, pending = null, created = false;
+
+    function post(m) { m.ssp = 1; try { parent.postMessage(m, '*'); } catch (e) {} }
+
+    var tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = function () { post({ type: 'error', data: 5 }); };
+    document.head.appendChild(tag);
+
+    window.onYouTubeIframeAPIReady = function () {
+        apiReady = true;
+        if (pending) create(pending);
+    };
+
+    function create(o) {
+        if (created) return;
+        created = true;
+        var vars = {
+            autoplay: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, modestbranding: 1,
+            rel: 0, showinfo: 0, playsinline: 1, cc_load_policy: 0, enablejsapi: 1, start: o.start || 0
+        };
+        if (o.loop) { vars.loop = 1; vars.playlist = o.videoId; }
+        player = new YT.Player('p', {
+            videoId: o.videoId, width: '100%', height: '100%', playerVars: vars,
+            events: {
+                onReady: function () { ready = true; post({ type: 'ready' }); },
+                onStateChange: function (e) { post({ type: 'state', data: e.data }); },
+                onError: function (e) { post({ type: 'error', data: e.data }); },
+                onAutoplayBlocked: function () { post({ type: 'autoplayblocked' }); }
+            }
+        });
+    }
+
+    var ALLOWED = { setVolume: 1, mute: 1, unMute: 1, playVideo: 1, pauseVideo: 1, seekTo: 1, loadVideoById: 1 };
+
+    window.addEventListener('message', function (e) {
+        var d = e.data;
+        if (!d || d.ssp !== 1) return;
+        if (d.cmd === 'create') {
+            if (apiReady) create(d); else pending = d;
+        } else if (d.cmd === 'call' && ready && ALLOWED[d.fn] && typeof player[d.fn] === 'function') {
+            try { player[d.fn].apply(player, d.args || []); } catch (err) {}
+        }
+    });
+
+    setInterval(function () {
+        if (!ready) return;
+        try {
+            var v = player.getVideoData ? player.getVideoData() : null;
+            post({ type: 'tick', data: {
+                time: player.getCurrentTime(), duration: player.getDuration(),
+                state: player.getPlayerState(), muted: player.isMuted(),
+                data: v ? { title: v.title, author: v.author } : null
+            } });
+        } catch (err) {}
+    }, 250);
+
+    post({ type: 'hello' });
+})();
+</script>
+</body>
+</html>
