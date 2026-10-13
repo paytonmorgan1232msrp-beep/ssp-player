@@ -19,6 +19,16 @@
  */
 (function () {
     var player = null, ready = false, apiReady = false, pending = null, created = false;
+    var wantVol = null, wantMuted = null;
+
+    function applyWanted() {
+        if (!ready || !player) return;
+        try {
+            if (wantMuted === true) player.mute();
+            else if (wantMuted === false) player.unMute();
+            if (wantVol !== null) player.setVolume(wantVol);
+        } catch (e) {}
+    }
 
     function post(m) { m.ssp = 1; try { parent.postMessage(m, '*'); } catch (e) {} }
 
@@ -44,7 +54,7 @@
             videoId: o.videoId, width: '100%', height: '100%', playerVars: vars,
             events: {
                 onReady: function () { ready = true; post({ type: 'ready' }); },
-                onStateChange: function (e) { post({ type: 'state', data: e.data }); },
+                onStateChange: function (e) { if (e.data === 1) applyWanted(); post({ type: 'state', data: e.data }); },
                 onError: function (e) { post({ type: 'error', data: e.data }); },
                 onAutoplayBlocked: function () { post({ type: 'autoplayblocked' }); }
             }
@@ -59,6 +69,9 @@
         if (d.cmd === 'create') {
             if (apiReady) create(d); else pending = d;
         } else if (d.cmd === 'call' && ready && ALLOWED[d.fn] && typeof player[d.fn] === 'function') {
+            if (d.fn === 'setVolume') wantVol = Math.max(0, Math.min(100, Number(d.args && d.args[0]) || 0));
+            else if (d.fn === 'mute') wantMuted = true;
+            else if (d.fn === 'unMute') wantMuted = false;
             try { player[d.fn].apply(player, d.args || []); } catch (err) {}
         }
     });
@@ -69,7 +82,7 @@
             var v = player.getVideoData ? player.getVideoData() : null;
             post({ type: 'tick', data: {
                 time: player.getCurrentTime(), duration: player.getDuration(),
-                state: player.getPlayerState(), muted: player.isMuted(),
+                state: player.getPlayerState(), muted: player.isMuted(), volume: player.getVolume(),
                 data: v ? { title: v.title, author: v.author } : null
             } });
         } catch (err) {}
